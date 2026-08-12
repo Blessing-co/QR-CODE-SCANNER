@@ -1,14 +1,69 @@
+#import tkinter as tk
+#from tkinter import messagebox  # New: Brings in the pop-up alert tool
+#import cv2
+#import qrcode
+#from PIL import Image, ImageTk
+
+
+
+import re
+import time
+import queue
+import threading
+import webbrowser
+from datetime import datetime
 import tkinter as tk
-from tkinter import messagebox  # New: Brings in the pop-up alert tool
+from tkinter import ttk, messagebox, filedialog, colorchooser
 import cv2
 import qrcode
 from PIL import Image, ImageTk
+
+URL_PATTERN = re.compile(r"^https?://", re.IGNORECASE)
+
+class CameraThread(threading.Thread):
+    def __init__(self, camera_index=0):
+        super().__init__(daemon=True)
+        self.camera_index = camera_index
+        self.frame_queue = queue.Queue(maxsize=1)
+        self.error_queue = queue.Queue(maxsize=1)
+        self._running = threading.Event()
+        self.actual_fps = 0.0
+
+    def run(self):
+       self.cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+       if not self.cap.isOpened():
+           self.error_queue.put("Could not open webcam...")
+           return
+       self._running.set()  
+       while self._running.is_set():
+           ok, frame = self.cap.read()
+           if not ok:
+              continue
+           if self.frame_queue.full():
+              try:
+                 self.frame_queue.get_nowait()
+              except queue.Empty:
+                 pass
+           self.frame_queue.put(frame)
+
+       self.cap.release()    
+
+    def stop(self):
+        self._running.clear()       
+              
+
+
+
+
+class Palette:
+    BG = "#12131a"
 
 class SimpleQRApp:
     def __init__(self, root):
         self.root = root
         self.root.title("My QR App")
         self.root.geometry("500x700")
+        self.root.configure(bg=Palette.BG)
 
         # --- SCANNER SECTION ---
         self.scan_label = tk.Label(root, text="Camera Preview Will Appear Here", bg="grey", width=50, height=15)
@@ -19,6 +74,14 @@ class SimpleQRApp:
 
         self.result_label = tk.Label(root, text="Scanned Data: None", font=("Arial", 12, "bold"))
         self.result_label.pack(pady=10)
+
+        #--Camera thread--
+        self.camera_thread = None
+        self.camera_active = False
+
+        #--  --
+        self.last_decoded = None
+        self.last_decoded_time = 0
 
         # --- GENERATOR SECTION ---
         self.input_box = tk.Entry(root, width=40)
